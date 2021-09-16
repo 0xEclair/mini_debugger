@@ -35,6 +35,7 @@ public:
     explicit Breakpoint(Breakpoint&& bp) = default;
     Breakpoint& operator=(const Breakpoint& bp) = default;
     Breakpoint& operator=(Breakpoint&& bp) = default;
+
     auto enable() {
         auto data = ptrace(PTRACE_PEEKDATA, pid_, addr_, nullptr);
         saved_data_ = static_cast<uint8_t>(data & 0xff);
@@ -52,6 +53,7 @@ public:
 
     auto is_enabled() const { return enabled_; }
     auto get_address() const { return addr_; }
+
 private:
     pid_t pid_;
     std::intptr_t addr_;
@@ -62,8 +64,7 @@ private:
 class Debugger {
 public:
     explicit Debugger(std::string_view prog_name,pid_t pid)
-        :prog_name_(prog_name), pid_(pid) {
-    }
+        :prog_name_(prog_name), pid_(pid) {}
 
     auto set_breakpoint_at(std::intptr_t addr) {
         std::cout << "Set breakpoint at address 0x" << std::hex << addr << '\n';
