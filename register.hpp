@@ -5,15 +5,15 @@
 #include <sys/user.h>
 
 namespace mini_debugger {
-    enum reg {
-        rax, rbx, rcx, rdx,
-        rdi, rsi, rbp, rsp,
-        r8,  r9,  r10, r11,
-        r12, r13, r14, r15,
-        rip, rflags,    cs,
-        orig_rax, fs_base,
-        gs_base,
-        fs, gs, ss, ds, es
+    enum class reg {
+        rax = 10, rbx = 5 , rcx = 11, rdx = 12,
+        rdi = 14, rsi = 13, rbp = 4 , rsp = 19,
+        r8  = 9 , r9  = 8 , r10 = 7 , r11 = 6 ,
+        r12 = 3 , r13 = 2 , r14 = 1 , r15 = 0 ,
+        rip = 16,      rflags  = 18,  cs = 17,
+        orig_rax = 15, fs_base = 21,
+        gs_base  = 22,
+        fs = 25, gs = 26, ss = 20, ds = 23, es = 24
     };
 
     constexpr std::size_t n_registers = 27;
@@ -55,22 +55,24 @@ namespace mini_debugger {
             }
     };
 
+    // to do
+    constexpr std::array<int, n_registers> index_of_dn = {
+
+    };
+    auto index_of(int dwarf_num) {
+        return index_of_dn[dwarf_num];
+    }
+
     auto get_register_value(pid_t pid, reg r) -> uint64_t {
         user_regs_struct regs;
         ptrace(PTRACE_GETREGS, pid, nullptr, &regs);
-        auto it = std::find_if(register_descriptors.begin(),register_descriptors.end(),[r](auto&& reg){
-           return  reg.r==r;
-        });
-        return *(reinterpret_cast<uint64_t*>(&regs) + (it - register_descriptors.begin()));
+        return *(reinterpret_cast<uint64_t*>(&regs) + static_cast<int>(r));
     }
 
     auto set_register_value(pid_t pid, reg r, uint64_t value) {
         user_regs_struct regs;
         ptrace(PTRACE_GETREGS, pid, nullptr, &regs);
-        auto it = std::find_if(register_descriptors.begin(), register_descriptors.end(), [r](auto&& reg){
-            return reg.r == r;
-        });
-        *(reinterpret_cast<uint64_t*>(&regs) + (it - register_descriptors.begin())) = value;
+        *(reinterpret_cast<uint64_t*>(&regs) + static_cast<int>(r)) = value;
         ptrace(PTRACE_SETREGS, pid, nullptr, &regs);
     }
 
@@ -85,11 +87,8 @@ namespace mini_debugger {
         return get_register_value(pid, it->r);
     }
 
-    auto name_of(reg r) -> std::string_view {
-        auto it = std::find_if(register_descriptors.begin(), register_descriptors.end(), [r](auto&& reg){
-            return reg.r == r;
-        });
-        return it->name;
+    auto name_of(reg r) {
+        return register_descriptors[static_cast<int>(r)].name;
     }
 
     auto get_register_from(std::string_view name) {
