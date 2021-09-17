@@ -7,8 +7,13 @@
 #include <sys/ptrace.h>
 #include <sys/wait.h>
 #include <sys/personality.h>
+#include <iomanip>
 
 #include "vendor/linenoise/linenoise.h"
+
+#include "register.hpp"
+
+using namespace mini_debugger;
 
 auto split = [](const auto& line, auto delimiter) {
     std::vector<std::string> out{};
@@ -109,6 +114,15 @@ public:
             handle_command(line);
             linenoiseHistoryAdd(line);
             linenoiseFree(line);
+        }
+    }
+
+    auto dump_registers() {
+        for(const auto& reg : register_descriptors) {
+            std::cout << reg.name << " 0x"
+                      << std::setfill('0') << std::setw(16)
+                      << std::hex << get_register_value(pid_, reg.r)
+                      << '\n';
         }
     }
 private:
