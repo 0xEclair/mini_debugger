@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <sys/ptrace.h>
 #include <sys/wait.h>
+#include <sys/personality.h>
 
 #include "vendor/linenoise/linenoise.h"
 
@@ -127,6 +128,7 @@ auto main(int argc, char* argv[]) -> int {
     if(pid == 0) {
         // child process
         // execute debugee
+        personality(ADDR_NO_RANDOMIZE);
         ptrace(PTRACE_TRACEME, 0, nullptr, nullptr);
         execl(prog, prog, nullptr);
     }
