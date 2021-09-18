@@ -35,7 +35,7 @@ auto is_prefix = [](const auto& s, const auto& of) {
 
 class Breakpoint {
 public:
-    explicit Breakpoint(pid_t pid, std::intptr_t addr)
+    explicit Breakpoint(pid_t pid, std::uintptr_t addr)
         :pid_(pid), addr_(addr) {}
     explicit Breakpoint(const Breakpoint& bp) = default;
     explicit Breakpoint(Breakpoint&& bp) = default;
@@ -58,11 +58,11 @@ public:
     }
 
     auto is_enabled() const { return enabled_; }
-    auto get_address() const { return addr_; }
+    auto get_address() const -> std::uintptr_t { return addr_; }
 
 private:
     pid_t pid_;
-    std::intptr_t addr_;
+    std::uintptr_t addr_;
     bool enabled_ = false;
     uint8_t saved_data_ = {};
 };
@@ -72,19 +72,38 @@ public:
     explicit Debugger(std::string_view prog_name,pid_t pid)
         :prog_name_(prog_name), pid_(pid) {}
 
-    auto set_breakpoint_at(std::intptr_t addr) {
+    auto set_breakpoint_at(std::uintptr_t addr) {
         std::cout << "Set breakpoint at address 0x" << std::hex << addr << '\n';
         auto bp = Breakpoint(pid_, addr);
         bp.enable();
         breakpoints_.emplace(typename decltype(breakpoints_)::value_type{addr, bp});
     }
 
-    auto continue_execution() {
-        ptrace(PTRACE_CONT, pid_, nullptr, nullptr);
-
+    auto wait_for_signal() {
         int wait_status;
         auto options = 0;
         waitpid(pid_, &wait_status, options);
+    }
+
+    auto step_over_breakpoint() -> void {
+        auto possible_breakpoint_location = get_pc() - 1;
+        if(breakpoints_.contains(possible_breakpoint_location)) {
+            auto& bp = breakpoints_[possible_breakpoint_location];
+            if(bp.is_enabled()) {
+                auto previous_instruction_address = possible_breakpoint_location;
+                set_pc(previous_instruction_address);
+                bp.disable();
+                ptrace(PTRACE_SINGLESTEP, pid_, nullptr, nullptr);
+                wait_for_signal();
+                bp.enable();
+            }
+        }
+    }
+
+    auto continue_execution() {
+        step_over_breakpoint();
+        ptrace(PTRACE_CONT, pid_, nullptr, nullptr);
+        wait_for_signal();
     }
 
     auto handle_command(const std::string& line) {
@@ -97,6 +116,28 @@ public:
         else if(is_prefix(command, std::string_view("break"))) {
             std::string addr(args[1], 2);
             set_breakpoint_at(std::stol(addr, 0, 16));
+        }
+        else if(is_prefix(command, std::string_view("register"))) {
+            if(is_prefix(args[1], std::string_view("dump"))) {
+                dump_registers();
+            }
+            else if(is_prefix(args[1], std::string_view("read"))) {
+                std::cout << get_register_value(pid_, get_register_from(args[2])) << '\n';
+            }
+            else if(is_prefix(args[1], std::string_view("write"))) {
+                std::string val(args[3], 2);
+                set_register_value(pid_, get_register_from(args[2]), std::stol(val, 0 ,16));
+            }
+        }
+        else if(is_prefix(command, std::string_view("memory"))) {
+            std::string addr(args[2], 2);
+            if(is_prefix(args[1], std::string_view("read"))) {
+                std::cout << std::hex << read_memory(std::stol(addr, 0, 16)) << '\n';
+            }
+            else if(is_prefix(args[1], std::string_view("write"))) {
+                std::string val(args[3], 2);
+                write_memory(std::stol(addr, 0, 16), std::stol(val, 0, 16));
+            }
         }
         else {
             std::cerr<< "Unknown command\n";
@@ -117,7 +158,7 @@ public:
         }
     }
 
-    auto dump_registers() {
+    auto dump_registers() const -> void {
         for(const auto& reg : register_descriptors) {
             std::cout << reg.name << " 0x"
                       << std::setfill('0') << std::setw(16)
@@ -125,10 +166,23 @@ public:
                       << '\n';
         }
     }
+    auto read_memory(uint64_t addr) const -> uint64_t {
+        return ptrace(PTRACE_PEEKDATA, pid_, addr, nullptr);
+    }
+    auto write_memory(uint64_t addr, uint64_t value) -> void {
+        ptrace(PTRACE_POKEDATA, pid_, addr, value);
+    }
+    auto get_pc() const -> uint64_t {
+        return get_register_value(pid_, reg::rip);
+    }
+    auto set_pc(uint64_t value) -> void {
+        set_register_value(pid_, reg::rip, value);
+    }
+
 private:
     std::string_view prog_name_;
     pid_t pid_;
-    std::unordered_map<std::intptr_t, Breakpoint> breakpoints_;
+    std::unordered_map<std::uintptr_t, Breakpoint> breakpoints_;
 };
 
 auto main(int argc, char* argv[]) -> int {
