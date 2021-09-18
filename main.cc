@@ -120,31 +120,31 @@ public:
         auto args = split(line, ' ');
         const auto& command = args[0];
 
-        if(is_prefix(command, std::string_view("continue"))) {
+        if(is_prefix(command, cmd::continue_running)) {
             continue_execution();
         }
-        else if(is_prefix(command, std::string_view("break"))) {
+        else if(is_prefix(command, cmd::breakpoint)) {
             std::string addr(args[1], 2);
             set_breakpoint_at(std::stol(addr, 0, 16));
         }
-        else if(is_prefix(command, std::string_view("register"))) {
-            if(is_prefix(args[1], std::string_view("dump"))) {
+        else if(is_prefix(command, cmd::reg)) {
+            if(is_prefix(args[1], cmd::dump)) {
                 dump_registers();
             }
-            else if(is_prefix(args[1], std::string_view("read"))) {
+            else if(is_prefix(args[1], cmd::read)) {
                 std::cout << get_register_value(pid_, get_register_from(args[2])) << '\n';
             }
-            else if(is_prefix(args[1], std::string_view("write"))) {
+            else if(is_prefix(args[1], cmd::write)) {
                 std::string val(args[3], 2);
                 set_register_value(pid_, get_register_from(args[2]), std::stol(val, 0 ,16));
             }
         }
-        else if(is_prefix(command, std::string_view("memory"))) {
+        else if(is_prefix(command, cmd::memory)) {
             std::string addr(args[2], 2);
-            if(is_prefix(args[1], std::string_view("read"))) {
+            if(is_prefix(args[1], cmd::read)) {
                 std::cout << std::hex << read_memory(std::stol(addr, 0, 16)) << '\n';
             }
-            else if(is_prefix(args[1], std::string_view("write"))) {
+            else if(is_prefix(args[1], cmd::write)) {
                 std::string val(args[3], 2);
                 write_memory(std::stol(addr, 0, 16), std::stol(val, 0, 16));
             }
@@ -155,9 +155,7 @@ public:
     }
 
     auto run() {
-        int wait_status;
-        auto options = 0;
-        waitpid(pid_, &wait_status, options);
+        wait_for_signal();
         // Wait until child process was sent a SIGTRAP because of ptrace().
 
         char* line = nullptr;
@@ -188,6 +186,19 @@ public:
     auto set_pc(uint64_t value) -> void {
         set_register_value(pid_, reg::rip, value);
     }
+
+public:
+    class Command {
+    public:
+        constexpr static std::string_view continue_running= {"continue"};
+        constexpr static std::string_view breakpoint = {"breakpoint"};
+        constexpr static std::string_view reg = {"register"};
+        constexpr static std::string_view dump = {"dump"};
+        constexpr static std::string_view read = {"read"};
+        constexpr static std::string_view write = {"write"};
+        constexpr static std::string_view memory = {"memory"};
+    };
+    using cmd = Command;
 
 private:
     std::string_view prog_name_;
