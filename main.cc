@@ -35,6 +35,7 @@ auto is_prefix = [](const auto& s, const auto& of) {
 
 class Breakpoint {
 public:
+    explicit Breakpoint() = default;
     explicit Breakpoint(pid_t pid, std::uintptr_t addr)
         :pid_(pid), addr_(addr) {}
     explicit Breakpoint(const Breakpoint& bp) = default;
@@ -83,6 +84,15 @@ public:
         int wait_status;
         auto options = 0;
         waitpid(pid_, &wait_status, options);
+        if(WIFEXITED(wait_status)) {
+            std::cout << "Exited code:" << WEXITSTATUS(wait_status) << '\n';
+        }
+        if(WIFSIGNALED(wait_status)) {
+            std::cout << "Terminated code:" << WTERMSIG(wait_status) << '\n';
+        }
+        if(WIFSTOPPED(wait_status)) {
+            std::cout << "Stopped code:" << WSTOPSIG(wait_status) << '\n';
+        }
     }
 
     auto step_over_breakpoint() -> void {
