@@ -55,12 +55,25 @@ namespace mini_debugger {
             }
     };
 
-    // to do
-    constexpr std::array<int, n_registers> index_of_dn = {
-
-    };
     auto index_of(int dwarf_num) {
+        constexpr static auto index_of_dn = [](){
+            constexpr auto dwarf_max_number = 67;
+            std::array<int, dwarf_max_number> res = {};
+
+            for(size_t i=0; i<n_registers; ++i) {
+                auto val = register_descriptors[i].dwarf_r;
+                if(val >= 0) {
+                    res[val] = i;
+                }
+            }
+            return res;
+        }();
+
         return index_of_dn[dwarf_num];
+    }
+
+    constexpr auto name_of(reg r) {
+        return register_descriptors[static_cast<int>(r)].name;
     }
 
     auto get_register_value(pid_t pid, reg r) -> uint64_t {
@@ -76,19 +89,12 @@ namespace mini_debugger {
         ptrace(PTRACE_SETREGS, pid, nullptr, &regs);
     }
 
-    auto get_register_value_from_dwarf_register(pid_t pid, unsigned reg_num) -> uint64_t  {
-        auto it = std::find_if(register_descriptors.begin(), register_descriptors.end(),[reg_num](auto&& reg){
-            return reg.dwarf_r == reg_num;
-        });
-        if(it == register_descriptors.end()) {
-            std::cerr << "Unknown dwarf register.";
+    auto get_register_value_from_dwarf_register(pid_t pid, int dwarf_num) -> uint64_t  {
+        if(dwarf_num < 0) {
+            std::cerr << "Unknown dwarf register number.";
             return -1;
         }
-        return get_register_value(pid, it->r);
-    }
-
-    auto name_of(reg r) {
-        return register_descriptors[static_cast<int>(r)].name;
+        return get_register_value(pid, register_descriptors[index_of(dwarf_num)].r);
     }
 
     auto get_register_from(std::string_view name) {
