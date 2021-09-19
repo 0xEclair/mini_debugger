@@ -2,14 +2,19 @@
 #include <sstream>
 #include <vector>
 #include <unordered_map>
+#include <iomanip>
 
 #include <unistd.h>
 #include <sys/ptrace.h>
 #include <sys/wait.h>
 #include <sys/personality.h>
-#include <iomanip>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
-#include "vendor/linenoise/linenoise.h"
+#include <linenoise.h>
+#include <dwarf/dwarf++.hh>
+#include <elf/elf++.hh>
 
 #include "register.hpp"
 
@@ -71,7 +76,11 @@ private:
 class Debugger {
 public:
     explicit Debugger(std::string_view prog_name,pid_t pid)
-        :prog_name_(prog_name), pid_(pid) {}
+        :prog_name_(std::move(prog_name)), pid_(pid) {
+        auto fd = open(prog_name_.data(), O_RDONLY);
+        elf_ = elf::elf(elf::create_mmap_loader(fd));
+        dwarf_ = dwarf::dwarf(dwarf::elf::create_loader(elf_));
+    }
 
     auto set_breakpoint_at(std::uintptr_t addr) {
         std::cout << "Set breakpoint at address 0x" << std::hex << addr << '\n';
@@ -186,6 +195,13 @@ public:
     auto set_pc(uint64_t value) -> void {
         set_register_value(pid_, reg::rip, value);
     }
+    auto function_of(uint64_t pc) {
+        for(auto& cu : dwarf_.compilation_units()) {
+            if(die_pc_range(cu.root()).contains(pc)) {
+
+            }
+        }
+    }
 
 public:
     class Command {
@@ -204,6 +220,8 @@ private:
     std::string_view prog_name_;
     pid_t pid_;
     std::unordered_map<std::uintptr_t, Breakpoint> breakpoints_;
+    dwarf::dwarf dwarf_;
+    elf::elf elf_;
 };
 
 auto main(int argc, char* argv[]) -> int {
