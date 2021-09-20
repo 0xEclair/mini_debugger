@@ -3,13 +3,12 @@
 #include <vector>
 #include <unordered_map>
 #include <iomanip>
+#include <fstream>
 
 #include <unistd.h>
 #include <sys/ptrace.h>
 #include <sys/wait.h>
 #include <sys/personality.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <fcntl.h>
 
 #include <linenoise.h>
@@ -163,9 +162,19 @@ public:
         }
     }
 
+    auto initialize_load_address() {
+        if(elf_.get_hdr().type == elf::et::dyn) {
+            std::ifstream map("/proc/" + std::to_string(pid_) + "/maps");
+            std::string addr;
+            std::getline(map, addr, '-');
+            load_address_ = std::stoi(addr, 0, 16);
+        }
+    }
+
     auto run() {
         wait_for_signal();
         // Wait until child process was sent a SIGTRAP because of ptrace().
+
 
         char* line = nullptr;
         while((line = linenoise("minidgb> ")) != nullptr) {
@@ -195,12 +204,61 @@ public:
     auto set_pc(uint64_t value) -> void {
         set_register_value(pid_, reg::rip, value);
     }
-    auto function_of(uint64_t pc) {
+    auto function_of(uint64_t pc) -> std::optional<dwarf::die> {
         for(auto& cu : dwarf_.compilation_units()) {
             if(die_pc_range(cu.root()).contains(pc)) {
-
+                for(auto& die : cu.root()) {
+                    if(die.tag == dwarf::DW_TAG::subprogram) {
+                        if(die_pc_range(die).contains(pc)) {
+                            return die;
+                        }
+                    }
+                }
             }
         }
+        std::cerr << "Cannot find function.";
+        return {};
+    }
+    auto line_entry_of(uint64_t pc) -> std::optional<dwarf::line_table::iterator> {
+        for(auto& cu : dwarf_.compilation_units()) {
+            if(die_pc_range(cu.root()).contains(pc)) {
+                auto& lt = cu.get_line_table();
+                auto res = lt.find_address(pc);
+                if(res == lt.end()) {
+                    std::cerr << "Cannot find line entry";
+                    return {};
+                }
+                else {
+                    return res;
+                }
+            }
+        }
+    }
+
+    auto offset_load_address(uint64_t addr) -> uint64_t {
+        return addr - load_address_;
+    }
+
+    auto print_source(const std::string& file_name, unsigned line, unsigned n_lines_context) {
+        std::ifstream file(file_name);
+        auto start_line = line <= n_lines_context ? 1 : line-n_lines_context;
+        auto end_line = line + n_lines_context + (line < n_lines_context? n_lines_context - line : 0)+1;
+        char c{};
+        auto current_line = 1u;
+        while(current_line != start_line && file.get(c)) {
+            if(c == '\n') {
+                ++current_line;
+            }
+        }
+        std::cout << (current_line == line? "> " : "  ");
+        while(current_line <= end_line && file.get(c)) {
+            std::cout << c;
+            if(c == '\n') {
+                ++current_line;
+                std::cout << (current_line == line? "> " : "  ");
+            }
+        }
+        std::cout << '\n';
     }
 
 public:
@@ -222,6 +280,7 @@ private:
     std::unordered_map<std::uintptr_t, Breakpoint> breakpoints_;
     dwarf::dwarf dwarf_;
     elf::elf elf_;
+    uint64_t load_address_{};
 };
 
 auto main(int argc, char* argv[]) -> int {
