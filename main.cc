@@ -88,10 +88,56 @@ public:
         breakpoints_.emplace(typename decltype(breakpoints_)::value_type{addr, bp});
     }
 
+    auto last_signal() {
+        siginfo_t info;
+        ptrace(PTRACE_GETSIGINFO, pid_, nullptr, &info);
+        return info;
+    }
+
+    auto handle_sigtrap(siginfo_t signal) {
+        switch(signal.si_code) {
+            case SI_KERNEL:
+            case TRAP_BRKPT: {
+                set_pc(get_pc()-1);
+                std::cout << "Hit breakpoint at address 0x" << std::hex << get_pc() << '\n';
+                auto offset = offset_load_address(get_pc());
+                auto line_entry = line_entry_of(offset);
+                if(line_entry) {
+                    auto le = *line_entry;
+                    print_source(le->file->path, le->line,3);
+                }
+                break;
+            }
+            case TRAP_TRACE: {
+                break;
+            }
+            default: {
+                std::cout << "Unknown SIGTRAP code " << signal.si_code << '\n';
+                break;
+            }
+        }
+    }
+
     auto wait_for_signal() {
         int wait_status;
         auto options = 0;
         waitpid(pid_, &wait_status, options);
+
+        auto signal = last_signal();
+        switch(signal.si_signo) {
+            case SIGTRAP: {
+                handle_sigtrap(signal);
+                break;
+            }
+            case SIGSEGV: {
+                std::cout << "Yay, segfault. Reason: " << signal.si_code << '\n';
+                break;
+            }
+            default: {
+                std::cout << "Got signal " << strsignal(signal.si_signo) << '\n';
+                break;
+            }
+        }
         if(WIFEXITED(wait_status)) {
             std::cout << "Exited code:" << WEXITSTATUS(wait_status) << '\n';
         }
@@ -104,12 +150,10 @@ public:
     }
 
     auto step_over_breakpoint() -> void {
-        auto possible_breakpoint_location = get_pc() - 1;
-        if(breakpoints_.contains(possible_breakpoint_location)) {
-            auto& bp = breakpoints_[possible_breakpoint_location];
+        auto pc = get_pc();
+        if(breakpoints_.contains(pc)) {
+            auto& bp = breakpoints_[pc];
             if(bp.is_enabled()) {
-                auto previous_instruction_address = possible_breakpoint_location;
-                set_pc(previous_instruction_address);
                 bp.disable();
                 ptrace(PTRACE_SINGLESTEP, pid_, nullptr, nullptr);
                 wait_for_signal();
@@ -225,24 +269,25 @@ public:
                 auto& lt = cu.get_line_table();
                 auto res = lt.find_address(pc);
                 if(res == lt.end()) {
-                    std::cerr << "Cannot find line entry";
-                    return {};
+                    break;
                 }
                 else {
                     return res;
                 }
             }
         }
+        std::cerr << "Cannot find line entry";
+        return {};
     }
 
     auto offset_load_address(uint64_t addr) -> uint64_t {
         return addr - load_address_;
     }
 
-    auto print_source(const std::string& file_name, unsigned line, unsigned n_lines_context) {
-        std::ifstream file(file_name);
+    auto print_source(std::string_view file_name, unsigned line, unsigned n_lines_context) -> void {
+        std::ifstream file(file_name.data());
         auto start_line = line <= n_lines_context ? 1 : line-n_lines_context;
-        auto end_line = line + n_lines_context + (line < n_lines_context? n_lines_context - line : 0)+1;
+        auto end_line = line + n_lines_context + (line < n_lines_context? n_lines_context - line : 0);
         char c{};
         auto current_line = 1u;
         while(current_line != start_line && file.get(c)) {
@@ -250,7 +295,8 @@ public:
                 ++current_line;
             }
         }
-        std::cout << (current_line == line? "> " : "  ");
+        std::cout << '\n'
+                  << (current_line == line? "> " : "  ");
         while(current_line <= end_line && file.get(c)) {
             std::cout << c;
             if(c == '\n') {
