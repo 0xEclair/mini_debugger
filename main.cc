@@ -189,6 +189,9 @@ public:
     }
 
     auto handle_command(const std::string& line) {
+        if(line == "") {
+            return ;
+        }
         auto args = split(line, ' ');
         const auto& command = args[0];
 
