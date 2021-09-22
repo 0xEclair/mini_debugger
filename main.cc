@@ -88,6 +88,13 @@ public:
         breakpoints_.emplace(typename decltype(breakpoints_)::value_type{addr, bp});
     }
 
+    auto remove_breakpoint(std::uintptr_t addr) {
+        if(breakpoints_.at(addr).is_enabled()) {
+            breakpoints_.at(addr).disable();
+        }
+        breakpoints_.erase(addr);
+    }
+
     auto last_signal() const {
         siginfo_t info;
         ptrace(PTRACE_GETSIGINFO, pid_, nullptr, &info);
@@ -182,7 +189,21 @@ public:
         }
     }
 
-    auto continue_execution() {
+    auto step_out() {
+        auto frame_pointer = get_register_value(pid_, reg::rbp);
+        auto return_address = read_memory(frame_pointer + 8);
+        auto need_remove_breakpoint = false;
+        if(!breakpoints_.contains(return_address)) {
+            set_breakpoint_at(return_address);
+            need_remove_breakpoint = true;
+        }
+        continue_execution();
+        if(need_remove_breakpoint) {
+            remove_breakpoint(return_address);
+        }
+    }
+
+    auto continue_execution() -> void {
         step_over_breakpoint();
         ptrace(PTRACE_CONT, pid_, nullptr, nullptr);
         wait_for_signal();
@@ -226,6 +247,9 @@ public:
         }
         else if(is_prefix(command, cmd::single_step_instruction)) {
             single_step_instruction_with_breakpoint_check();
+        }
+        else if(is_prefix(command, std::string_view("out"))) {
+            step_out();
         }
         else {
             std::cerr<< "Unknown command\n";

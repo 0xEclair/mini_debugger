@@ -16,6 +16,7 @@ set_target_properties(variable PROPERTIES COMPILE_FLAGS "-gdwarf-2")
 
 add_executable(hello examples/hello.cc)
 add_executable(stack examples/stack.cc)
+set_target_properties(stack PROPERTIES COMPILE_FLAGS "-g -O0")
 
 target_link_libraries(
         mini_debugger
