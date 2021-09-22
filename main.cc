@@ -75,7 +75,7 @@ private:
 class Debugger {
 public:
     explicit Debugger(std::string_view prog_name,pid_t pid)
-        :prog_name_(std::move(prog_name)), pid_(pid) {
+        :prog_name_(prog_name), pid_(pid) {
         auto fd = open(prog_name_.data(), O_RDONLY);
         elf_ = elf::elf(elf::create_mmap_loader(fd));
         dwarf_ = dwarf::dwarf(dwarf::elf::create_loader(elf_));
@@ -88,7 +88,7 @@ public:
         breakpoints_.emplace(typename decltype(breakpoints_)::value_type{addr, bp});
     }
 
-    auto last_signal() {
+    auto last_signal() const {
         siginfo_t info;
         ptrace(PTRACE_GETSIGINFO, pid_, nullptr, &info);
         return info;
@@ -109,6 +109,13 @@ public:
                 break;
             }
             case TRAP_TRACE: {
+                std::cout << "Step at address 0x" << std::hex << get_pc() << '\n';
+                auto offset = offset_load_address(get_pc());
+                auto line_entry = line_entry_of(offset);
+                if(line_entry) {
+                    auto le = *line_entry;
+                    print_source(le->file->path, le->line,3);
+                }
                 break;
             }
             default: {
@@ -149,14 +156,27 @@ public:
         }
     }
 
+    auto single_step_instruction() {
+        ptrace(PTRACE_SINGLESTEP, pid_, nullptr, nullptr);
+        wait_for_signal();
+    }
+
+    auto single_step_instruction_with_breakpoint_check() {
+        if(breakpoints_.contains(get_pc())) {
+            step_over_breakpoint();
+        }
+        else {
+            single_step_instruction();
+        }
+    }
+
     auto step_over_breakpoint() -> void {
         auto pc = get_pc();
         if(breakpoints_.contains(pc)) {
             auto& bp = breakpoints_[pc];
             if(bp.is_enabled()) {
                 bp.disable();
-                ptrace(PTRACE_SINGLESTEP, pid_, nullptr, nullptr);
-                wait_for_signal();
+                single_step_instruction();
                 bp.enable();
             }
         }
@@ -201,6 +221,9 @@ public:
                 write_memory(std::stol(addr, 0, 16), std::stol(val, 0, 16));
             }
         }
+        else if(is_prefix(command, cmd::single_step_instruction)) {
+            single_step_instruction_with_breakpoint_check();
+        }
         else {
             std::cerr<< "Unknown command\n";
         }
@@ -218,7 +241,7 @@ public:
     auto run() {
         wait_for_signal();
         // Wait until child process was sent a SIGTRAP because of ptrace().
-
+        initialize_load_address();
 
         char* line = nullptr;
         while((line = linenoise("minidgb> ")) != nullptr) {
@@ -276,7 +299,7 @@ public:
                 }
             }
         }
-        std::cerr << "Cannot find line entry";
+        std::cerr << "Cannot find line entry\n";
         return {};
     }
 
@@ -317,6 +340,7 @@ public:
         constexpr static std::string_view read = {"read"};
         constexpr static std::string_view write = {"write"};
         constexpr static std::string_view memory = {"memory"};
+        constexpr static std::string_view single_step_instruction = {"singlestep"};
     };
     using cmd = Command;
 
