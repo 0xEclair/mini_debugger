@@ -116,6 +116,8 @@ public:
                 break;
             }
             case TRAP_TRACE: {
+//#define TRACE_PRINT_SOURCE
+#ifdef TRACE_PRINT_SOURCE
                 std::cout << "Step at address 0x" << std::hex << get_pc() << '\n';
                 auto offset = offset_load_address(get_pc());
                 auto line_entry = line_entry_of(offset);
@@ -124,6 +126,7 @@ public:
                     print_source(le->file->path, le->line,3);
                 }
                 break;
+#endif
             }
             default: {
                 std::cout << "Unknown SIGTRAP code " << signal.si_code << '\n';
@@ -203,6 +206,66 @@ public:
         }
     }
 
+    auto step_in() {
+        auto le = line_entry_of(offset_load_address(get_pc()));
+        if(!le) {
+            std::cout << "No entry at pc:" << std::hex << get_pc() << '\n';
+            return;
+        }
+        auto line = (*le)->line;
+        for(auto tmp = line_entry_of(offset_load_address(get_pc())); tmp ;) {
+            if((*tmp)->line != line) {
+                break;
+            }
+            single_step_instruction_with_breakpoint_check();
+            tmp = line_entry_of(offset_load_address(get_pc()));
+        }
+
+        le = line_entry_of(offset_load_address(get_pc()));
+        if(le) {
+            auto& line_entry = *le;
+            print_source(line_entry->file->path, line_entry->line, 3);
+        }
+    }
+
+    auto step_over() {
+        auto func = function_of(offset_load_address(get_pc()));
+        if(!func) {
+            return ;
+        }
+
+        auto func_entry = at_low_pc(*func);
+        auto func_end = at_high_pc(*func);
+        auto le = line_entry_of(func_entry);
+        if(!le) {
+            return ;
+        }
+        auto start_line = line_entry_of(get_pc());
+        if(!start_line) {
+            return ;
+        }
+        std::vector<std::uintptr_t> to_delete{};
+        while((*le)->address < func_end) {
+            auto load_address = offset_of_dwarf((*le)->address);
+            if((*le)->address != (*start_line)->address && !breakpoints_.contains(load_address)) {
+                set_breakpoint_at(load_address);
+                to_delete.push_back(load_address);
+            }
+            ++(*le);
+        }
+
+        auto frame_point = get_register_value(pid_, reg::rbp);
+        auto return_address = read_memory(frame_point + 8);
+        if(!breakpoints_.contains(return_address)) {
+            set_breakpoint_at(return_address);
+            to_delete.push_back(return_address);
+        }
+        continue_execution();
+        for(auto addr : to_delete) {
+            remove_breakpoint(addr);
+        }
+    }
+
     auto continue_execution() -> void {
         step_over_breakpoint();
         ptrace(PTRACE_CONT, pid_, nullptr, nullptr);
@@ -250,6 +313,12 @@ public:
         }
         else if(is_prefix(command, std::string_view("out"))) {
             step_out();
+        }
+        else if(is_prefix(command, std::string_view("in"))) {
+            step_in();
+        }
+        else if(is_prefix(command, std::string_view("over"))) {
+            step_over();
         }
         else {
             std::cerr<< "Unknown command\n";
@@ -332,6 +401,10 @@ public:
 
     auto offset_load_address(uint64_t addr) -> uint64_t {
         return addr - load_address_;
+    }
+
+    auto offset_of_dwarf(uint64_t addr) -> uint64_t {
+        return addr + load_address_;
     }
 
     auto print_source(std::string_view file_name, unsigned line, unsigned n_lines_context) -> void {
