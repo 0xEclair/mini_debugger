@@ -236,22 +236,27 @@ public:
 
         auto func_entry = at_low_pc(*func);
         auto func_end = at_high_pc(*func);
+
         auto le = line_entry_of(func_entry);
         if(!le) {
             return ;
         }
-        auto start_line = line_entry_of(get_pc());
-        if(!start_line) {
+        auto& line_entry = *le;
+
+        auto sl = line_entry_of(get_pc());
+        if(!sl) {
             return ;
         }
+        auto& start_line = *sl;
+
         std::vector<std::uintptr_t> to_delete{};
-        while((*le)->address < func_end) {
-            auto load_address = offset_of_dwarf((*le)->address);
-            if((*le)->address != (*start_line)->address && !breakpoints_.contains(load_address)) {
+        while(line_entry->address < func_end) {
+            auto load_address = offset_of_dwarf(line_entry->address);
+            if(line_entry->address != start_line->address && !breakpoints_.contains(load_address)) {
                 set_breakpoint_at(load_address);
                 to_delete.push_back(load_address);
             }
-            ++(*le);
+            ++line_entry;
         }
 
         auto frame_point = get_register_value(pid_, reg::rbp);
@@ -311,13 +316,13 @@ public:
         else if(is_prefix(command, cmd::single_step_instruction)) {
             single_step_instruction_with_breakpoint_check();
         }
-        else if(is_prefix(command, std::string_view("out"))) {
+        else if(is_prefix(command, cmd::step_out)) {
             step_out();
         }
-        else if(is_prefix(command, std::string_view("in"))) {
+        else if(is_prefix(command, cmd::step_in)) {
             step_in();
         }
-        else if(is_prefix(command, std::string_view("over"))) {
+        else if(is_prefix(command, cmd::step_over)) {
             step_over();
         }
         else {
@@ -441,6 +446,9 @@ public:
         constexpr static std::string_view write = {"write"};
         constexpr static std::string_view memory = {"memory"};
         constexpr static std::string_view single_step_instruction = {"singlestep"};
+        constexpr static std::string_view step_out = {"stout"};
+        constexpr static std::string_view step_in = {"stin"};
+        constexpr static std::string_view step_over = {"stover"};
     };
     using cmd = Command;
 
