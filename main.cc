@@ -16,6 +16,7 @@
 #include <elf/elf++.hh>
 
 #include "register.hpp"
+#include "symbol.hpp"
 
 using namespace mini_debugger;
 
@@ -41,7 +42,7 @@ class Breakpoint {
 public:
     explicit Breakpoint() = default;
     explicit Breakpoint(pid_t pid, std::uintptr_t addr)
-        :pid_(pid), addr_(addr) {}
+            :pid_(pid), addr_(addr) {}
     explicit Breakpoint(const Breakpoint& bp) = default;
     explicit Breakpoint(Breakpoint&& bp) = default;
     Breakpoint& operator=(const Breakpoint& bp) = default;
@@ -75,7 +76,7 @@ private:
 class Debugger {
 public:
     explicit Debugger(std::string_view prog_name,pid_t pid)
-        :prog_name_(prog_name), pid_(pid) {
+            :prog_name_(prog_name), pid_(pid) {
         auto fd = open(prog_name_.data(), O_RDONLY);
         elf_ = elf::elf(elf::create_mmap_loader(fd));
         dwarf_ = dwarf::dwarf(dwarf::elf::create_loader(elf_));
@@ -88,11 +89,65 @@ public:
         breakpoints_.emplace(typename decltype(breakpoints_)::value_type{addr, bp});
     }
 
+    auto set_breakpoint_at(std::string_view function) {
+        for(const auto& cu : dwarf_.compilation_units()) {
+            for(const auto& die : cu.root()) {
+                if(die.has(dwarf::DW_AT::name) && dwarf::at_name(die) == function) {
+                    auto low_pc = dwarf::at_low_pc(die);
+                    auto le = line_entry_of(low_pc);
+                    if(!le) {
+                        return;
+                    }
+                    auto& line_entry = *le;
+                    ++line_entry;
+                    set_breakpoint_at(offset_of_dwarf(line_entry->address));
+                }
+            }
+        }
+    }
+
+    auto set_breakpoint_at(std::string_view file, uint32_t line) {
+        for(const auto& cu : dwarf_.compilation_units()) {
+            auto is_suffix = [](auto s, auto of){
+                if(s.size() > of.size()) {
+                    return false;
+                }
+                auto diff = of.size() - s.size();
+                return std::equal(s.begin(), s.end(), of.begin()+diff);
+            };
+            if(is_suffix(file, dwarf::at_name(cu.root()))) {
+                const auto& lt = cu.get_line_table();
+                for(const auto& entry : lt) {
+                    if(entry.is_stmt && entry.line == line) {
+                        set_breakpoint_at(offset_load_address(entry.address));
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
     auto remove_breakpoint(std::uintptr_t addr) {
         if(breakpoints_.at(addr).is_enabled()) {
             breakpoints_.at(addr).disable();
         }
         breakpoints_.erase(addr);
+    }
+
+    auto lookup_symbol_by(std::string_view name) {
+        std::vector<symbol> syms;
+        for(const auto& sec: elf_.sections()) {
+            if(sec.get_hdr().type != elf::sht::symtab && sec.get_hdr().type != elf::sht::dynsym) {
+                continue;
+            }
+            for(const auto& sym : sec.as_symtab()) {
+                if(sym.get_name() == name) {
+                    auto& data = sym.get_data();
+                    syms.push_back(symbol{to_symbol_type(data.type()), sym.get_name(), data.value});
+                }
+            }
+        }
+        return syms;
     }
 
     auto last_signal() const {
@@ -325,6 +380,19 @@ public:
         else if(is_prefix(command, cmd::step_over)) {
             step_over();
         }
+        else if(is_prefix(command, cmd::breakq)) {
+            if(args[1][0] == '0' && args[1][1] == 'x') {
+                std::string addr(args[1],2);
+                set_breakpoint_at(std::stol(addr, 0, 16));
+            }
+            else if(args[1].find(':') != std::string::npos) {
+                auto file_and_line = split(args[1], ':');
+                set_breakpoint_at(file_and_line[0], std::stol(file_and_line[1], 0, 16));
+            }
+            else {
+                set_breakpoint_at(args[1]);
+            }
+        }
         else {
             std::cerr<< "Unknown command\n";
         }
@@ -449,6 +517,7 @@ public:
         constexpr static std::string_view step_out = {"stout"};
         constexpr static std::string_view step_in = {"stin"};
         constexpr static std::string_view step_over = {"stover"};
+        constexpr static std::string_view breakq = {"break"};
     };
     using cmd = Command;
 
