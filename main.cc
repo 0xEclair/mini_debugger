@@ -134,22 +134,6 @@ public:
         breakpoints_.erase(addr);
     }
 
-    auto lookup_symbol_by(std::string_view name) {
-        std::vector<symbol> syms;
-        for(const auto& sec: elf_.sections()) {
-            if(sec.get_hdr().type != elf::sht::symtab && sec.get_hdr().type != elf::sht::dynsym) {
-                continue;
-            }
-            for(const auto& sym : sec.as_symtab()) {
-                if(sym.get_name() == name) {
-                    auto& data = sym.get_data();
-                    syms.push_back(symbol{to_symbol_type(data.type()), sym.get_name(), data.value});
-                }
-            }
-        }
-        return syms;
-    }
-
     auto last_signal() const {
         siginfo_t info;
         ptrace(PTRACE_GETSIGINFO, pid_, nullptr, &info);
@@ -343,8 +327,17 @@ public:
             continue_execution();
         }
         else if(is_prefix(command, cmd::breakpoint)) {
-            std::string addr(args[1], 2);
-            set_breakpoint_at(std::stol(addr, 0, 16));
+            if(args[1][0] == '0' && args[1][1] == 'x') {
+                std::string addr(args[1],2);
+                set_breakpoint_at(std::stol(addr, 0, 16));
+            }
+            else if(args[1].find(':') != std::string::npos) {
+                auto file_and_line = split(args[1], ':');
+                set_breakpoint_at(file_and_line[0], std::stol(file_and_line[1], 0, 16));
+            }
+            else {
+                set_breakpoint_at(args[1]);
+            }
         }
         else if(is_prefix(command, cmd::reg)) {
             if(is_prefix(args[1], cmd::dump)) {
@@ -380,17 +373,11 @@ public:
         else if(is_prefix(command, cmd::step_over)) {
             step_over();
         }
-        else if(is_prefix(command, cmd::breakq)) {
-            if(args[1][0] == '0' && args[1][1] == 'x') {
-                std::string addr(args[1],2);
-                set_breakpoint_at(std::stol(addr, 0, 16));
-            }
-            else if(args[1].find(':') != std::string::npos) {
-                auto file_and_line = split(args[1], ':');
-                set_breakpoint_at(file_and_line[0], std::stol(file_and_line[1], 0, 16));
-            }
-            else {
-                set_breakpoint_at(args[1]);
+        else if(is_prefix(command, cmd::symbol)) {
+            auto syms = lookup_symbol(elf_, args[1]);
+            for(const auto& s : syms) {
+                std::cout << s.name << ' '
+                          << to_string(s.type) << " 0x" << std::hex << s.addr << '\n';
             }
         }
         else {
@@ -413,7 +400,7 @@ public:
         initialize_load_address();
 
         char* line = nullptr;
-        while((line = linenoise("minidgb> ")) != nullptr) {
+        while((line = linenoise("dbg> ")) != nullptr) {
             handle_command(line);
             linenoiseHistoryAdd(line);
             linenoiseFree(line);
@@ -517,7 +504,7 @@ public:
         constexpr static std::string_view step_out = {"stout"};
         constexpr static std::string_view step_in = {"stin"};
         constexpr static std::string_view step_over = {"stover"};
-        constexpr static std::string_view breakq = {"break"};
+        constexpr static std::string_view symbol = {"symbol"};
     };
     using cmd = Command;
 

@@ -23,7 +23,7 @@ auto to_string(symbol_type st) -> std::string_view {
 
 struct symbol {
     symbol_type type;
-    std::string_view name;
+    std::string name;
     std::uintptr_t addr;
 };
 
@@ -37,3 +37,19 @@ auto to_symbol_type(elf::stt sym) {
         default:return symbol_type::notype;
     }
 }
+
+auto lookup_symbol = [](elf::elf& elf, std::string_view name) {
+    std::vector<symbol> syms;
+    for(const auto& sec: elf.sections()) {
+        if(sec.get_hdr().type != elf::sht::symtab && sec.get_hdr().type != elf::sht::dynsym) {
+            continue;
+        }
+        for(auto&& sym : sec.as_symtab()) {
+            if(sym.get_name() == name) {
+                auto& data = sym.get_data();
+                syms.push_back(symbol{to_symbol_type(data.type()), sym.get_name(), data.value});
+            }
+        }
+    }
+    return syms;
+};
