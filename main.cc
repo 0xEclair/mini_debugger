@@ -382,6 +382,9 @@ public:
                           << to_string(s.type) << " 0x" << std::hex << s.addr << '\n';
             }
         }
+        else if(is_prefix(command, cmd::backtrace)) {
+            print_backtrace();
+        }
         else {
             std::cerr<< "Unknown command\n";
         }
@@ -469,6 +472,31 @@ public:
         return addr + load_address_;
     }
 
+    auto print_backtrace() -> void {
+        auto output_frame = [fn = 0](auto&& func) mutable {
+            std::cout << "frame #" << fn++
+                      << ": 0x" << dwarf::at_low_pc(func) << ' '
+                      << dwarf::at_name(func) << '\n';
+        };
+        auto current = function_of(offset_load_address(get_pc()));
+        if(!current) {
+            return;
+        }
+        output_frame(current.value());
+        auto frame_pointer = get_register_value(pid_, reg::rbp);
+        auto return_address = read_memory(frame_pointer+8);
+
+        while(dwarf::at_name(*current) != "main") {
+            current = function_of(offset_load_address(return_address));
+            if(!current) {
+                return;
+            }
+            output_frame(*current);
+            frame_pointer = read_memory(frame_pointer);
+            return_address = read_memory(frame_pointer+8);
+        }
+    }
+
     auto print_source(std::string_view file_name, unsigned line, unsigned n_lines_context) -> void {
         std::ifstream file(file_name.data());
         auto start_line = line <= n_lines_context ? 1 : line-n_lines_context;
@@ -507,6 +535,8 @@ public:
         constexpr static std::string_view step_in = {"stin"};
         constexpr static std::string_view step_over = {"stover"};
         constexpr static std::string_view symbol = {"symbol"};
+
+        constexpr static std::string_view backtrace = {"backtrace"};
     };
     using cmd = Command;
 
