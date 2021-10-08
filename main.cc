@@ -99,7 +99,8 @@ public:
                         return;
                     }
                     auto& line_entry = *le;
-                    ++line_entry;
+                    //code below will lead program to enter(intromit) first line of function implementation.
+                    //++line_entry;
                     set_breakpoint_at(offset_of_dwarf(line_entry->address));
                 }
             }
@@ -164,8 +165,8 @@ public:
                     auto le = *line_entry;
                     print_source(le->file->path, le->line,3);
                 }
-                break;
 #endif
+                break;
             }
             default: {
                 std::cout << "Unknown SIGTRAP code " << signal.si_code << '\n';
@@ -194,15 +195,16 @@ public:
                 break;
             }
         }
-        if(WIFEXITED(wait_status)) {
-            std::cout << "Exited code:" << WEXITSTATUS(wait_status) << '\n';
-        }
-        if(WIFSIGNALED(wait_status)) {
-            std::cout << "Terminated code:" << WTERMSIG(wait_status) << '\n';
-        }
-        if(WIFSTOPPED(wait_status)) {
-            std::cout << "Stopped code:" << WSTOPSIG(wait_status) << '\n';
-        }
+        // no need
+//        if(WIFEXITED(wait_status)) {
+//            std::cout << "Exited code:" << WEXITSTATUS(wait_status) << '\n';
+//        }
+//        if(WIFSIGNALED(wait_status)) {
+//            std::cout << "Terminated code:" << WTERMSIG(wait_status) << '\n';
+//        }
+//        if(WIFSTOPPED(wait_status)) {
+//            std::cout << "Stopped code:" << WSTOPSIG(wait_status) << '\n';
+//        }
     }
 
     auto single_step_instruction() {
@@ -333,7 +335,7 @@ public:
             }
             else if(args[1].find(':') != std::string::npos) {
                 auto file_and_line = split(args[1], ':');
-                set_breakpoint_at(file_and_line[0], std::stol(file_and_line[1], 0, 16));
+                set_breakpoint_at(file_and_line[0], std::stoi(file_and_line[1]));
             }
             else {
                 set_breakpoint_at(args[1]);
