@@ -38,6 +38,29 @@ auto is_prefix = [](const auto& s, const auto& of) {
     return std::equal(s.begin(), s.end(), of.begin());
 };
 
+class ptrace_expr_context : public dwarf::expr_context {
+public:
+    ptrace_expr_context(pid_t pid)
+        :pid_(pid) {}
+
+    dwarf::taddr reg(unsigned regnum) override {
+        return get_register_value_from_dwarf_register(pid_, regnum);
+    }
+
+    dwarf::taddr pc() override {
+        user_regs_struct regs;
+        ptrace(PTRACE_GETREGS, pid_, nullptr, &regs);
+        return regs.rip;
+    }
+
+    dwarf::taddr deref_size(dwarf::taddr address, unsigned size) override {
+        return ptrace(PTRACE_PEEKDATA, pid_, address, nullptr);
+    }
+
+private:
+    pid_t pid_;
+};
+
 class Breakpoint {
 public:
     explicit Breakpoint() = default;
@@ -385,6 +408,9 @@ public:
         else if(is_prefix(command, cmd::backtrace)) {
             print_backtrace();
         }
+        else if(is_prefix(command, cmd::variables)) {
+            read_variables();
+        }
         else {
             std::cerr<< "Unknown command\n";
         }
@@ -426,6 +452,38 @@ public:
     auto write_memory(uint64_t addr, uint64_t value) -> void {
         ptrace(PTRACE_POKEDATA, pid_, addr, value);
     }
+
+    auto read_variables() -> void {
+        auto func = function_of(offset_load_address(get_pc()));
+        if(!func) {
+            return;
+        }
+        for(const auto& die : *func) {
+            if(die.tag == dwarf::DW_TAG::variable) {
+                auto loc = die[dwarf::DW_AT::location];
+                if(loc.get_type() == dwarf::value::type::exprloc) {
+                    ptrace_expr_context c(pid_);
+                    auto res = loc.as_exprloc().evaluate(&c);
+                    switch(res.location_type) {
+                        case dwarf::expr_result::type::address: {
+                            auto value = read_memory(res.value);
+                            std::cout << dwarf::at_name(die) << " (0x" << std::hex << res.value << ") = " << value << '\n';
+                            break;
+                        }
+                        case dwarf::expr_result::type::reg: {
+                            auto value = get_register_value_from_dwarf_register(pid_, res.value);
+                            std::cout << dwarf::at_name(die) << " (reg " << res.value << ") = " << value << '\n';
+                            break;
+                        }
+                        default: {
+                            std::cout << "Unhandled variable location\n";
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     auto get_pc() const -> uint64_t {
         return get_register_value(pid_, reg::rip);
     }
@@ -537,6 +595,8 @@ public:
         constexpr static std::string_view symbol = {"symbol"};
 
         constexpr static std::string_view backtrace = {"backtrace"};
+
+        constexpr static std::string_view variables = {"variables"};
     };
     using cmd = Command;
 
